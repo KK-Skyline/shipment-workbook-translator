@@ -258,3 +258,18 @@ The full-scale handoff input (about 409.6 million memberships) was not run.
   `INTERNAL_P2_CONTRACT_VIOLATION` instead of a typed range error.
 - The budget bounds this sweep only; the module's other phases have not had
   a complete resource audit.
+
+### Sync with upstream main (2026-10-16)
+
+`origin/main` advanced to `b3abc81` (PR #1, dead-code removal in
+`translator.py` only). This branch merged it in `4c48fa5` without conflicts.
+After the merge, `translator.py` SHA-256 is
+`0551f691be3b158b2c73af0714dec22f8880ae61dae729c84c52610eb1b03ccd`; hashes
+quoted above refer to the pre-merge `acb8996` base.
+`python -B -m unittest discover -s tests -v` exited 0 (19 tests OK, CPython
+3.14.3) and `python -B -m examples.basic` exited 0 with the unchanged digest
+`sha256:c04f0cdc…6df2a78`. Removing the new condition again on the merged
+source gave 5 failures, and restoring it gave the same hash again. The open
+member-state finding is being fixed separately on
+`fix/merge-member-state-quadratic`; the two branches are expected to conflict
+in this file and in `SECURITY.md`.
