@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shipment-workbook-translator"
+version = "0.1.0"
+description = "Deterministic shipment spreadsheet translation with typed errors and cell-level provenance"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{name = "KK-Skyline"}]
+keywords = ["logistics", "spreadsheet", "provenance", "etl", "deterministic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Topic :: Office/Business",
+]
+
+[project.urls]
+Repository = "https://github.com/KK-Skyline/shipment-workbook-translator"
+Issues = "https://github.com/KK-Skyline/shipment-workbook-translator/issues"
+
+[tool.setuptools.packages.find]
+include = ["shipment_translator*"]
