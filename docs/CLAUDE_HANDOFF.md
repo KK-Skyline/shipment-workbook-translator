@@ -167,8 +167,9 @@ computable `budget_rectangles` must not exceed 200,000.
   depends on rectangle width (its join walk, `active_by_column` insertion and
   expiry each visit every column of every swept rectangle). Swept rectangles
   are a subset of `budget_rectangles`, so stored memberships and column visits
-  are each at most 200,000. Coverage expansion is bounded separately by the
-  member cells, which come from the at most 200,000 input cells.
+  are each at most 200,000. Coverage memory is bounded by the member cells,
+  of which there are at most 200,000. The budget does **not** bound coverage
+  CPU: see the open member-state finding under "Remaining limits".
 - Value: for pairwise-disjoint rectangles, summed width <= summed area ==
   union area <= 200,000 (the existing union-area gate). No non-overlapping
   declaration set that previously passed the area gates is newly rejected; a
@@ -234,11 +235,26 @@ The full-scale handoff input (about 409.6 million memberships) was not run.
 
 ### Remaining limits
 
-- Independent Claude Review has not been performed; this record contains only
-  the implementer's claims.
+- Independent Claude Review has not been performed. A fresh-context sub-agent
+  review (labelled 子代理审查, not a Claude Review sign-off) independently
+  traced the path, re-ran the suite (19 OK, exit 0, CPython 3.14.3) and the
+  RED/mutation matrix (5/5/4/2/3 failures) and found no defect in `fdfb238`.
+  It reported the pre-existing issues below.
+- Open, pre-existing (not covered by the budget): `_snapshot` emits one
+  `MERGE_MEMBER_STATE_INVALID` candidate per invalid non-top-left member. Each
+  candidate holds refs for every member of the group, so cost is O(n²) in
+  group size. Measured with one fully covered 1×n merge whose members all hold
+  values: n=250 0.22 s, n=500 0.86 s, n=1000 4.16 s (Claude Code, CPython
+  3.14.3). The sub-agent measured 66 s at n=4000. Reducing this to one
+  candidate per group may change which evidence is selected in groups that mix
+  valid and invalid members, because candidate ordering uses arena ref ids.
+  This needs its own analysis and fix.
 - The Codex Security scan remains incomplete (report-storage permission
   failure above); no security scan has passed.
 - `merged_cell_info` range/top-left strings are not length-bounded before
-  `_coordinate` parsing. This was not analysed as part of this fix.
+  `_coordinate` parsing. The sub-agent measured about 150 ms per cell for very
+  long column letters (O(k²) big-integer accumulation). Columns above 16384 in
+  a merge range, or row numbers with more than 4300 digits, surface as
+  `INTERNAL_P2_CONTRACT_VIOLATION` instead of a typed range error.
 - The budget bounds this sweep only; the module's other phases have not had
   a complete resource audit.
