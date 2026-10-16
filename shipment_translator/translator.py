@@ -4658,12 +4658,16 @@ def _snapshot(raw_cells: list[RawCell] | tuple[RawCell, ...], phase: list[str] |
             sheet_cells = sheets[sheet_ref]
             anchor_position = sheet_positions[(anchor.row, anchor.column)]
             sheet_cells[anchor_position] = anchor
+            # The first invalid member fails the group.  Its candidate is the
+            # one _select_candidate keeps: later candidates of this group share
+            # its scope and only register newer evidence descriptors, so stop
+            # here instead of rebuilding n refs per member (O(n^2), CWE-400).
             for member in members:
                 if member == top_key:
                     continue
                 raw_value, displayed, formula, cached, status, empty = states[member]
                 if raw_value is not None or displayed != "" or formula is not None or cached is not None or status != "not_applicable" or empty is not True:
-                    p2_candidates.append(_candidate("MERGE_MEMBER_STATE_INVALID", "MERGED_CELL_INFO", tuple(_ref(by_coordinate[item]) for item in members if item in by_coordinate))); continue
+                    p2_candidates.append(_candidate("MERGE_MEMBER_STATE_INVALID", "MERGED_CELL_INFO", tuple(_ref(by_coordinate[item]) for item in members if item in by_coordinate))); break
                 cell = by_coordinate[member]
                 replacement = _Cell(cell.sheet_ref, cell.row, cell.column, cell.ref, anchor.value, anchor.formula, anchor.cache_status, anchor.row, anchor.column, anchor.ref, origin, anchor.normalized_text, anchor.casefolded_text)
                 by_coordinate[member] = replacement
