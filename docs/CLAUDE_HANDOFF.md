@@ -237,3 +237,15 @@ were confirmed. Its four documentation findings (CRLF count wording, a dangling
 "below" reference, the test-blob hash, the line number) are fixed in this text.
 Not verified by the reviewer: the quoted timings, the 6000-case differential, the
 owner's approval, and CI.
+
+### Sync with upstream main (2026-10-16)
+
+`origin/main` advanced to `b3abc81` (PR #1, dead-code removal in
+`translator.py` only). This branch merged it in `caf2d14` without conflicts.
+After the merge, `translator.py` SHA-256 is
+`93c971c89351482e0817a6d78c7648c46291847fe767a3069395ab256b6dba87`; hashes
+quoted above refer to the pre-merge `acb8996` base.
+`python -B -m unittest discover -s tests -v` exited 0 (15 tests OK, CPython
+3.14.3) and `python -B -m examples.basic` exited 0 with the unchanged digest
+`sha256:c04f0cdc…6df2a78`. Re-mutating `break` back to `continue` on the
+merged source gave 4 failures, and restoring it gave the same hash again.
