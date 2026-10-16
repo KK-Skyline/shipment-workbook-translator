@@ -9,12 +9,11 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import bisect
 import heapq
-import json
 import math
 import re
 import unicodedata
 from types import MappingProxyType
-from typing import Any, Callable
+from typing import Callable
 
 from shipment_translator.models import RawCell
 
@@ -1888,25 +1887,6 @@ def _compact_dependency_metadata(descriptor: object, arena: tuple[_EvidenceAtom,
     return count, bbox, token_bytes
 
 
-def _compact_dependency_ids(descriptor: object, arena_length: int,
-                            base_state: MappingProxyType | None = None,
-                            arena: tuple[_EvidenceAtom, ...] | None = None) -> tuple[int, ...] | None:
-    """Validate and expand one private compact dependency descriptor to IDs."""
-    decoded = _private_descriptor_decoder(descriptor, arena_length, base_state, arena)
-    if decoded is None:
-        return None
-    if decoded[0] == _TAG_REF:
-        ids = (decoded[1],)
-    elif decoded[0] == _TAG_SORTED_BASE:
-        ids = decoded[2][0]
-    else:
-        ids = tuple(sorted((*decoded[2][0], *decoded[3])))
-    if (any(type(ref_id) is not int or isinstance(ref_id, bool) or not 0 <= ref_id < arena_length for ref_id in ids)
-            or tuple(sorted(ids)) != ids or len(ids) != len(set(ids))):
-        return None
-    return ids
-
-
 def _compact_base_metadata(arena: tuple[_EvidenceAtom, ...], ids: tuple[int, ...]) -> tuple[int, tuple[int, int, int, int], int]:
     """Store exact membership, bbox and token metadata once for a shared base."""
     if not ids:
@@ -2051,13 +2031,6 @@ def _atomic_inventory(atomic_facts: Mapping[str, tuple[str, tuple[_EvidenceAtom,
     if any(not name or (name.startswith("range:") and state != "bound") for name, state, _refs in inventory):
         raise ValueError("owner range inventory closure")
     return tuple(sorted(inventory))
-
-
-
-def _p5_ref_key(ref: _EvidenceAtom) -> tuple[str, int, int, str, int, int, str, str]:
-    """The contract-complete SourceCellKey of one reference."""
-    return (ref.sheet_ref, ref.row_index, ref.column_index, ref.cell_ref,
-            ref.authority_row_index, ref.authority_column_index, ref.authority_cell_ref, ref.value_origin)
 
 
 def _matrix_entry(matrix: MappingProxyType, profile: str, owner: str, field: str, state: str) -> tuple[object, str, bool, frozenset[str]]:
@@ -2744,40 +2717,6 @@ def _p7_source_ref_metrics(ref: SourceCellRefV1 | tuple) -> tuple[int, int]:
     ))
 
 
-def _p7_range_metrics(arena: tuple[SourceCellRefV1, ...], ids: tuple[int, ...]) -> tuple[int, int]:
-    if not ids:
-        raise ValueError("canonical range closure")
-    first = arena[ids[0]]
-    start_row = end_row = first.row_index
-    start_column = end_column = first.column_index
-    for ref_id in ids:
-        ref = arena[ref_id]
-        if ref.sheet_ref != first.sheet_ref:
-            raise ValueError("canonical range closure")
-        start_row = min(start_row, ref.row_index, ref.authority_row_index)
-        end_row = max(end_row, ref.row_index, ref.authority_row_index)
-        start_column = min(start_column, ref.column_index, ref.authority_column_index)
-        end_column = max(end_column, ref.column_index, ref.authority_column_index)
-    return _p7_object_metrics((
-        ("end_cell", _p7_value_metrics(_a1(end_row, end_column))),
-        ("end_column", _p7_value_metrics(end_column)),
-        ("end_row", _p7_value_metrics(end_row)),
-        ("sheet_ref", _p7_value_metrics(first.sheet_ref)),
-        ("start_cell", _p7_value_metrics(_a1(start_row, start_column))),
-        ("start_column", _p7_value_metrics(start_column)),
-        ("start_row", _p7_value_metrics(start_row)),
-    ))
-
-
-def _p7_field_provenance_metrics(field: str, rule: str, arena: tuple[SourceCellRefV1, ...],
-                                  ids: tuple[int, ...]) -> tuple[int, int]:
-    return _p7_object_metrics((
-        ("derivation_rule", _p7_value_metrics(rule)),
-        ("field", _p7_value_metrics(field)),
-        ("source_cells", _p7_sequence_metrics(_p7_source_ref_metrics(arena[ref_id]) for ref_id in ids)),
-    ))
-
-
 def _p7_ref_sequence_metrics_from_metadata(count: int, token_bytes: int,
                                             sample: SourceCellRefV1) -> tuple[int, int]:
     """Rebuild exact JSON/graph metrics from streamed descriptor metadata."""
@@ -3154,25 +3093,6 @@ def _public_graph_items(value: object) -> int:
     if is_dataclass(value):
         return 1 + sum(_public_graph_items(getattr(value, field.name)) for field in fields(value))
     raise ValueError("public graph closure")
-
-
-def _merge_owner_slots(previous: dict[str, tuple[str, tuple[SourceCellRefV1, ...]]],
-                       current: dict[str, tuple[str, tuple[SourceCellRefV1, ...]]],
-                       states: dict[str, str]) -> dict[str, tuple[str, tuple[SourceCellRefV1, ...]]]:
-    """Merge private structural slots before, never from, public provenance."""
-    if set(previous) != set(current):
-        raise ValueError("owner slot closure")
-    merged: dict[str, tuple[str, tuple[SourceCellRefV1, ...]]] = {}
-    for slot in previous:
-        prior_state, prior_refs = previous[slot]
-        current_state, current_refs = current[slot]
-        state = states.get(slot, current_state)
-        if slot not in states and prior_state != current_state:
-            raise ValueError("owner slot state closure")
-        merged[slot] = (state, tuple(sorted(
-            set(prior_refs) | set(current_refs), key=lambda ref: _source_cells_key((ref,)),
-        )))
-    return merged
 
 
 def _compact_slot_map(slots: MappingProxyType | dict[str, tuple[str, tuple[_EvidenceAtom, ...]]]) -> dict[str, tuple[str, tuple[object, ...]]]:
@@ -3827,7 +3747,6 @@ _EMPTY_PUBLIC_PROVENANCE_RULES = frozenset((
     "NO_SOURCE_AGGREGATE_LOAD_UNIT_GROUP",
     "SUMMARY_EXCLUSION",
 ))
-_PUBLIC_DERIVATION_RULES = frozenset(entry[1] for entry in _OWNER_DEPENDENCY_MATRIX.values())
 
 
 def _p7_public_ref_identity(value: SourceCellRefV1) -> tuple[str, int, int, str, int, int, str, str] | None:
@@ -4921,15 +4840,6 @@ def _row_build_from_inventory(profile: str, values: MappingProxyType,
         owner_kind="row",
         structural_states=structural_states,
         atomic_inventory=inventory,
-    )
-
-
-def _row_build_from_slots(profile: str, values: MappingProxyType,
-                          slots: dict[str, tuple[str, tuple[_EvidenceAtom, ...]]],
-                          carton_state: str, aggregate_state: str) -> _OwnerBuildState:
-    """Intern raw row slots once, then delegate to the compact-only row builder."""
-    return _row_build_from_inventory(
-        profile, values, _atomic_inventory(slots), carton_state, aggregate_state,
     )
 
 
