@@ -1,6 +1,8 @@
 # Claude implementation and independent review handoff
 
-Prepared: 2026-10-16. Status: known issue open; core source not patched.
+Prepared: 2026-10-16. Status on this branch (`fix/merge-member-state-quadratic`):
+the overlap-sweep issue below is still open here. A separate quadratic
+member-state issue is patched in `1dade92`; see the last section.
 
 ## Purpose and ownership
 
@@ -144,3 +146,79 @@ Never read or upload the original private repository as part of this bounded tas
 After a verified repair, update the known-issue sections to reference the fixing
 commit and review evidence. Retain the historical finding accurately. Broader
 conformance, a general XLSX adapter and solver integration are separate work.
+
+## Fixed on this branch: quadratic P2 member-state evidence (CWE-400)
+
+Branch `fix/merge-member-state-quadratic`, from `main` at `acb8996`.
+It is independent of the overlap-sweep branch `fix/merge-membership-budget`.
+Fix commit: `1dade92`. Nothing has been pushed, merged or released.
+
+Defect: in `_snapshot`'s coverage pass (around entry line 4742), every invalid
+non-top-left member of a complete merge appended `MERGE_MEMBER_STATE_INVALID`
+with refs for all n members and then `continue`d. That gave n-1 candidates of
+n refs each, all of which `_select_candidate` keyed: O(n^2) CPU. A 1xn merge
+whose cells all declare the same range and top-left and all hold `"x"` passes
+every count, area and width budget. Reported timings: n=1000 took 4.16 s and
+n=4000 about 66 s.
+
+Why stopping at the first invalid member keeps the evidence: every candidate in
+the group has the same phase, rank, code and field, and the same `cell` scope
+(the anchor is the group's smallest coordinate). They differ only in their
+`SORTED_BASE` descriptor id, which is allocated in creation order. A later
+candidate contains this group's newly replaced atoms, so it can never reuse an
+earlier base. The first candidate therefore always has the smallest key, and
+candidates from other groups or codes are ordered by scope or rank. Fix:
+`continue` becomes `break`, plus a four-line comment. The edit was made with a
+byte-level script that keeps the file's mixed CRLF/LF line endings (6917 CRLF
+lines out of 7064 before and after).
+
+Accepted semantic difference, approved by the owner on 2026-10-16: in mixed
+valid/invalid groups the old code registered about n/2 distinct n-ref bases. Once
+they passed 20*200000 memberships, `_private_descriptor_from_ids` raised and
+the entry returned `INTERNAL_P2_CONTRACT_VIOLATION` with empty evidence. A 1x3000
+alternating group took 118 s to reach that result. The same input now returns
+`MERGE_MEMBER_STATE_INVALID` with rule-derived evidence.
+
+Evidence in `tests/test_merge_member_state.py` (6 tests, all through
+`translate_shipment_workbook`):
+
+- Expected evidence comes from the rule, not from output: the anchor and the
+  earlier valid members are `MERGED_TOP_LEFT_DIRECT` with anchor authority, and
+  the first invalid member and everything after it are `DIRECT_CELL`. Cases:
+  all invalid, alternating both ways, valid then invalid, invalid then valid,
+  only the last member invalid, a 2x3 row-major merge, two sheets, three groups,
+  and reversed or shuffled input.
+- Work counter: it wraps the internal `_candidate` (not the public entry) and
+  records the evidence size of each member-state candidate. A 1x64 group must
+  produce exactly `[64]`. Positive control: two failing groups give `[5, 7]`, and
+  a valid merge gives `[]`. The 1x3000 alternating case must be typed and give
+  `[3000]`.
+- RED before the fix (test file `c13b8ac7…`, translator `c6a6f8e5…`):
+  4 failures. The counter saw 63 and 31 candidates of 64 refs; the positive
+  control saw `[5, 7, 7]`; the 1x3000 case returned
+  `INTERNAL_P2_CONTRACT_VIOLATION`. 15 tests ran, 104 s, exit 1.
+- Anti-door check: the fixed source (`4056554d6b5a7e1d095b0e97c169d94281562f32c97b510df2423a453ebaefd2`)
+  was reverted byte for byte to `c6a6f8e5…` (`git diff --quiet` clean), which
+  gave the same 4 failures. It was then restored to `4056554d…` and passed again.
+- Differential check: 6000 random small multi-sheet merge inputs, shuffled, with
+  holes, bad top-lefts and overlaps. Results from `acb8996` and from the fix were
+  identical in `repr` in 6000/6000 cases, 3411 of them member-state failures.
+- After the fix, 1xn all-invalid and alternating groups take 0.06 s at n=1000,
+  0.26 s at n=4000 and 1.04 s at n=16384.
+
+Commands on Windows, Python 3.14.3, at `1dade92`:
+`python -B -m unittest discover -s tests -v` exited 0 (15 tests: 9 existing and
+6 new, about 0.44 s). `python -B -m examples.basic` exited 0 (1 row, 2 cartons,
+`sha256:c04f0cdc…`). CI for this branch has not run because it has not been pushed.
+
+Remaining limits:
+
+- The overlap-sweep amplification above is not fixed on this branch.
+- Each failing group still costs O(n log n) for one candidate's sort, and the
+  coverage pass is O(total members). The work is linear-ish, but the code still
+  runs inside the caller's process.
+- Merging this branch with `fix/merge-membership-budget` is expected to conflict
+  in this file and in `SECURITY.md`; the `translator.py` hunks do not overlap.
+- Codex Security has still not completed, so no audit pass is claimed. Review
+  of this fix: 子代理审查 (sub-agent review, not a Claude Review sign-off).
+  The result is recorded below.
