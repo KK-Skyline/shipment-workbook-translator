@@ -153,7 +153,7 @@ Branch `fix/merge-member-state-quadratic`, from `main` at `acb8996`.
 It is independent of the overlap-sweep branch `fix/merge-membership-budget`.
 Fix commit: `1dade92`. Nothing has been pushed, merged or released.
 
-Defect: in `_snapshot`'s coverage pass (around entry line 4742), every invalid
+Defect: in `_snapshot`'s coverage pass (entry line 4747; line 4751 after the fix), every invalid
 non-top-left member of a complete merge appended `MERGE_MEMBER_STATE_INVALID`
 with refs for all n members and then `continue`d. That gave n-1 candidates of
 n refs each, all of which `_select_candidate` keyed: O(n^2) CPU. A 1xn merge
@@ -169,8 +169,9 @@ candidate contains this group's newly replaced atoms, so it can never reuse an
 earlier base. The first candidate therefore always has the smallest key, and
 candidates from other groups or codes are ordered by scope or rank. Fix:
 `continue` becomes `break`, plus a four-line comment. The edit was made with a
-byte-level script that keeps the file's mixed CRLF/LF line endings (6917 CRLF
-lines out of 7064 before and after).
+byte-level script that keeps the file's mixed CRLF/LF line endings: there are
+147 LF-only lines before and after. The CRLF count went from 6917 to 6921
+because the four new comment lines use CRLF, like the lines around them.
 
 Accepted semantic difference, approved by the owner on 2026-10-16: in mixed
 valid/invalid groups the old code registered about n/2 distinct n-ref bases. Once
@@ -193,7 +194,8 @@ Evidence in `tests/test_merge_member_state.py` (6 tests, all through
   produce exactly `[64]`. Positive control: two failing groups give `[5, 7]`, and
   a valid merge gives `[]`. The 1x3000 alternating case must be typed and give
   `[3000]`.
-- RED before the fix (test file `c13b8ac7…`, translator `c6a6f8e5…`):
+- RED before the fix (test file: CRLF working copy `c13b8ac7…`, committed LF blob
+  `4ee05f14…`; translator `c6a6f8e5…`):
   4 failures. The counter saw 63 and 31 candidates of 64 refs; the positive
   control saw `[5, 7, 7]`; the 1x3000 case returned
   `INTERNAL_P2_CONTRACT_VIOLATION`. 15 tests ran, 104 s, exit 1.
@@ -222,3 +224,16 @@ Remaining limits:
 - Codex Security has still not completed, so no audit pass is claimed. Review
   of this fix: 子代理审查 (sub-agent review, not a Claude Review sign-off).
   The result is recorded below.
+
+子代理审查 result (2026-10-16, clean-context general-purpose agent, of `1dade92`
+and `ca9a878`): no blocking issues. It independently traced the selection
+argument: the scope is the same within a group and differs between groups,
+group members are disjoint, base ids only increase, and a member-state candidate
+always returns a P2 failure. It re-ran the new tests against `acb8996`
+(4 failures, 89 s) and ran its own differential check: 4012 cases with 0
+differences, 717 of them member-state failures, with groups of up to 800 cells.
+The full suite (15 tests) and the example both exited 0, and the line endings
+were confirmed. Its four documentation findings (CRLF count wording, a dangling
+"below" reference, the test-blob hash, the line number) are fixed in this text.
+Not verified by the reviewer: the quoted timings, the 6000-case differential, the
+owner's approval, and CI.
