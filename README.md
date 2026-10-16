@@ -111,14 +111,18 @@ Limits:
 The original application's historical test counts do not describe this standalone
 release. Its current verification is the checked-in suite and published CI.
 
-### Known security issue — fix pending
+### Known security issues — one patched (review pending), one open
 
-The current merge-overlap sweep can amplify memory consumption for malicious,
-overlapping merge declarations despite passing its area/count guards (CWE-400).
-Do not deploy this alpha release as an in-process parser for untrusted workloads.
-The maintainer elected to publish this snapshot with the issue documented and
-delegate remediation to Claude with independent review. See the
-[repair handoff](docs/CLAUDE_HANDOFF.md) for evidence and acceptance criteria.
+Up to snapshot `acb8996`, the merge-overlap sweep could amplify memory use for
+malicious, overlapping merge declarations that passed its area/count guards
+(CWE-400). Commit `fdfb238` bounds the sweep by a 200,000 rectangle-column
+membership budget and rejects larger declaration sets with
+`RAW_MERGE_BUDGET_EXCEEDED` before allocation. The patch has not been
+released, and independent Claude Review of it is still pending. A separate,
+pre-existing quadratic CPU path in merge member-state validation remains open
+(see [SECURITY.md](SECURITY.md)). Do not deploy this alpha as an in-process
+parser for untrusted workloads. See the
+[repair handoff](docs/CLAUDE_HANDOFF.md) for evidence and remaining limits.
 The Codex Security audit did not complete because its local report storage failed
 a permissions check; no completed security-audit attestation is claimed.
 

@@ -4505,9 +4505,15 @@ def _snapshot(raw_cells: list[RawCell] | tuple[RawCell, ...], phase: list[str] |
         if start is None or end is None or start[0] > end[0] or start[1] > end[1]:
             continue
         budget_rectangles[(coordinate[0], span)] = (start, end)
+    # The overlap sweep stores and walks one entry per rectangle column, so
+    # its work is the summed width, not the union area: overlapping
+    # rectangles repeat columns without growing the union.  Pairwise-disjoint
+    # rectangles have summed width <= summed area == union area, so no
+    # non-overlapping set within the union-area gate is rejected by this bound.
     if (len(budget_rectangles) > 50000
             or any((end[0] - start[0] + 1) * (end[1] - start[1] + 1) > 200000
-                   for start, end in budget_rectangles.values())):
+                   for start, end in budget_rectangles.values())
+            or sum(end[1] - start[1] + 1 for start, end in budget_rectangles.values()) > 200000):
         return {}, _candidate_failure(_select_candidate([
             _candidate("RAW_MERGE_BUDGET_EXCEEDED", "RESOURCE_MERGE_AREA"),
         ]))
@@ -4563,8 +4569,8 @@ def _snapshot(raw_cells: list[RawCell] | tuple[RawCell, ...], phase: list[str] |
     for sheet_ref, sheet_rectangles in rectangles_by_sheet.items():
         sheet_rectangles.sort(key=lambda item: (item[1], item[2], item[0]))
         active_by_end_row: list[tuple[int, int]] = []
-        # The distinct-area gate above bounds every non-overlapping cell that
-        # this sweep can visit.  If any cell is already occupied we have the
+        # The summed-width gate above bounds the column memberships this sweep
+        # stores and visits.  If any cell is already occupied we have the
         # canonical rank-7 P2 fact, so do not degrade a typed failure into a
         # quadratic pair enumeration.
         active_by_column: list[set[int] | None] = [None] * 16385

@@ -1,6 +1,7 @@
 # Claude implementation and independent review handoff
 
-Prepared: 2026-10-16. Status: known issue open; core source not patched.
+Prepared: 2026-10-16. Status: core patched in `fdfb238` (see "Repair record"
+below); independent Claude Review pending; not released.
 
 ## Purpose and ownership
 
@@ -144,3 +145,131 @@ Never read or upload the original private repository as part of this bounded tas
 After a verified repair, update the known-issue sections to reference the fixing
 commit and review evidence. Retain the historical finding accurately. Broader
 conformance, a general XLSX adapter and solver integration are separate work.
+
+## Repair record (2026-10-16, implementing agent: Claude Code)
+
+Baseline: Git `acb89969be078636eb5eb213b3c07ede188d1c67`, `translator.py`
+SHA-256 `c6a6f8e5…ddde5` (matches the entry hash above). Fix commit:
+`fdfb238e5983150a1d9675b22143268438c02881` on branch
+`fix/merge-membership-budget` (not merged, not pushed, not released).
+Patched `translator.py` SHA-256:
+`b0708b1dca5c959c67bed04557a37c75b58fb807bccb6d24b8707782744d6616`.
+`translator.py` keeps its mixed CRLF/LF line endings; the patch touches no other lines.
+
+### Change
+
+`_snapshot` adds one condition to the existing count/per-rectangle-area gate:
+the sum of `end_column - start_column + 1` over the deduplicated, syntactically
+computable `budget_rectangles` must not exceed 200,000.
+
+- Units: rectangle-column memberships, workbook-wide across all sheets.
+- Consumer invariant: the overlap sweep is the only P2 consumer whose work
+  depends on rectangle width (its join walk, `active_by_column` insertion and
+  expiry each visit every column of every swept rectangle). Swept rectangles
+  are a subset of `budget_rectangles`, so stored memberships and column visits
+  are each at most 200,000. Coverage memory is bounded by the member cells,
+  of which there are at most 200,000. The budget does **not** bound coverage
+  CPU: see the open member-state finding under "Remaining limits".
+- Value: for pairwise-disjoint rectangles, summed width <= summed area ==
+  union area <= 200,000 (the existing union-area gate). No non-overlapping
+  declaration set that previously passed the area gates is newly rejected; a
+  test covers the extreme valid case (25,000 complete 1x8 merges, union and
+  memberships both exactly 200,000, P2 accepted).
+- Failure: existing `RAW_MERGE_BUDGET_EXCEEDED` (P2, rank 4, scope `workbook`,
+  field `RESOURCE_MERGE_AREA`, no source cells). Phase: P2 resource preflight,
+  before `merge_groups`, the overlap sweep and coverage.
+
+### Precedence change
+
+Affected inputs are only declaration sets whose summed width exceeds 200,000
+while passing the earlier gates; such sets necessarily overlap, or contain
+locally invalid rectangles that already fail P2. They previously returned a P2
+semantic code (normally `MERGE_RANGE_OVERLAP`, rank 7) after the costly sweep,
+or exhausted memory. They now return `RAW_MERGE_BUDGET_EXCEEDED`. Against the
+P2 rank order this matches ranks 5–11. For ranks 1–3 (`CELL_ERROR`,
+`MERGE_SCHEMA_INVALID`, `MERGE_RANGE_INVALID`) it follows the precedent of the
+existing area gates, which already return before those collected candidates. A
+regression test confirms the pre-fix area gate behaves this way. Inputs at or
+below the budget keep their previous result and evidence.
+
+### Tests (`tests/test_merge_budget.py`, 10 new; the 9 original tests unchanged)
+
+Public-entry witnesses with expectations derived from input geometry. The test
+counts sweep work with `sys.setprofile` (heap pushes from `_snapshot`,
+`component_root` calls) and measures peak allocations with `tracemalloc`.
+Coverage: scaled handoff family (2x13 cells, 213,148 memberships, union
+16,408); thresholds 199,999 / 200,000 / 200,001, with a positive control showing
+that the instrument sees the sweep at 200,000; workbook-wide two-sheet total;
+four input permutations for the budget failure and for overlap evidence;
+precedence against the existing area gate; incomplete in-budget declarations
+keep `MERGE_COVERAGE_INCOMPLETE`; valid vertical/horizontal merges keep the
+canonical bytes; vertical-merge members carry top-left authority; and the
+maximal valid P2 load.
+
+Observed counters on CPython 3.14.3 (Windows):
+
+| Witness | Before (`acb8996`) | After (`fdfb238`) |
+| --- | --- | --- |
+| handoff 2x13 | `MERGE_RANGE_OVERLAP`, 26 pushes, 205,020 lookups, peak 18.8 MB | budget error, 0, 0, peak 82 KB |
+| 200,001 | `MERGE_RANGE_OVERLAP`, 25, 191,859, 18.8 MB | budget error, 0, 0, 66 KB |
+| 200,000 | `MERGE_RANGE_OVERLAP`, 25, 191,858, 18.8 MB | unchanged |
+
+The full-scale handoff input (about 409.6 million memberships) was not run.
+
+### RED/GREEN evidence
+
+- New tests against unpatched `acb8996` source: 10 run, 5 failed (all
+  over-budget cases), 5 passed (compatibility/control cases).
+- Mutations, each run on the full suite and then restored from a saved copy:
+  remove the new condition → 5 failures; `>= 200000` → 4 failures (at-threshold
+  overlap, valid maximal load); `> 200001` → 2 failures; same check moved after
+  the sweep (correct error code, late rejection) → 3 failures from the
+  work counters (`26 != 0`, `25 != 0`). Restored hash re-verified as `b0708b1d…`.
+- `python -B -m unittest discover -s tests -v`: exit 0, 19 tests OK
+  (CPython 3.14.3). In a clean CPython 3.12.13 venv after `pip install .`: exit 0,
+  19 tests OK.
+- `python -B -m examples.basic`: exit 0 on 3.14.3 and 3.12.13; digest
+  `sha256:c04f0cdc…6df2a78`, identical to the unpatched source.
+- GitHub Actions (3.11–3.14): not run for this branch, because it has not been pushed.
+  Python 3.11 and 3.13 were not tested locally.
+
+### Remaining limits
+
+- Independent Claude Review has not been performed. A fresh-context sub-agent
+  review (labelled 子代理审查, not a Claude Review sign-off) independently
+  traced the path, re-ran the suite (19 OK, exit 0, CPython 3.14.3) and the
+  RED/mutation matrix (5/5/4/2/3 failures) and found no defect in `fdfb238`.
+  It reported the pre-existing issues below.
+- Open, pre-existing (not covered by the budget): `_snapshot` emits one
+  `MERGE_MEMBER_STATE_INVALID` candidate per invalid non-top-left member. Each
+  candidate holds refs for every member of the group, so cost is O(n²) in
+  group size. Measured with one fully covered 1×n merge whose members all hold
+  values: n=250 0.22 s, n=500 0.86 s, n=1000 4.16 s (Claude Code, CPython
+  3.14.3). The sub-agent measured 66 s at n=4000. Reducing this to one
+  candidate per group may change which evidence is selected in groups that mix
+  valid and invalid members, because candidate ordering uses arena ref ids.
+  This needs its own analysis and fix.
+- The Codex Security scan remains incomplete (report-storage permission
+  failure above); no security scan has passed.
+- `merged_cell_info` range/top-left strings are not length-bounded before
+  `_coordinate` parsing. The sub-agent measured about 150 ms per cell for very
+  long column letters (O(k²) big-integer accumulation). Columns above 16384 in
+  a merge range, or row numbers with more than 4300 digits, surface as
+  `INTERNAL_P2_CONTRACT_VIOLATION` instead of a typed range error.
+- The budget bounds this sweep only; the module's other phases have not had
+  a complete resource audit.
+
+### Sync with upstream main (2026-10-16)
+
+`origin/main` advanced to `b3abc81` (PR #1, dead-code removal in
+`translator.py` only). This branch merged it in `4c48fa5` without conflicts.
+After the merge, `translator.py` SHA-256 is
+`0551f691be3b158b2c73af0714dec22f8880ae61dae729c84c52610eb1b03ccd`; hashes
+quoted above refer to the pre-merge `acb8996` base.
+`python -B -m unittest discover -s tests -v` exited 0 (19 tests OK, CPython
+3.14.3) and `python -B -m examples.basic` exited 0 with the unchanged digest
+`sha256:c04f0cdc…6df2a78`. Removing the new condition again on the merged
+source gave 5 failures, and restoring it gave the same hash again. The open
+member-state finding is being fixed separately on
+`fix/merge-member-state-quadratic`; the two branches are expected to conflict
+in this file and in `SECURITY.md`.
